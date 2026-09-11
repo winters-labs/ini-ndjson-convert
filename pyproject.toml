@@ -1,0 +1,18 @@
+[project]
+name = "ini-ndjson"
+version = "0.1.0"
+description = "Streaming converter between INI files and newline-delimited JSON"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "winters-labs" }]
+
+[project.scripts]
+ini-ndjson = "ini_ndjson.cli:main"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["ini_ndjson*"]
