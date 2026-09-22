@@ -1,4 +1,6 @@
 import io
+import random
+import string
 import unittest
 
 from ini_ndjson.core import (
@@ -127,6 +129,80 @@ class NdjsonRoundTripTests(unittest.TestCase):
             list(iter_ndjson_sections(io.StringIO(ndjson_text))),
             [("a", {"x": "1"}), ("b", {})],
         )
+
+
+# Kept out of NAME_CHARS/VALUE_CHARS: '=', ':', '[', ']', '#', ';', and
+# whitespace. Those all carry grammar meaning (or get stripped) in the
+# current parser, and fuzzing them belongs with the inline-comment/quoting
+# support that parser doesn't have yet.
+_NAME_CHARS = string.ascii_letters + string.digits + "_-"
+_VALUE_CHARS = string.ascii_letters + string.digits + "_-."
+
+
+def _random_token(rng, chars, min_len, max_len):
+    return "".join(rng.choice(chars) for _ in range(rng.randint(min_len, max_len)))
+
+
+def _random_structure(rng):
+    """Build a random (name, values) list in the shape iter_ini_sections yields."""
+    structure = []
+
+    if rng.random() < 0.5:
+        global_values = {
+            _random_token(rng, _NAME_CHARS, 1, 8): _random_token(rng, _VALUE_CHARS, 0, 8)
+            for _ in range(rng.randint(1, 4))
+        }
+        structure.append((GLOBAL_SECTION, global_values))
+
+    for _ in range(rng.randint(0, 5)):
+        name = _random_token(rng, _NAME_CHARS, 1, 10)
+        values = {
+            _random_token(rng, _NAME_CHARS, 1, 8): _random_token(rng, _VALUE_CHARS, 0, 8)
+            for _ in range(rng.randint(0, 5))
+        }
+        structure.append((name, values))
+
+    return structure
+
+
+def _render_ini(structure):
+    lines = []
+    for name, values in structure:
+        if name != GLOBAL_SECTION:
+            lines.append(f"[{name}]")
+        for key, value in values.items():
+            lines.append(f"{key} = {value}")
+    return "\n".join(lines) + "\n" if lines else ""
+
+
+class FuzzRoundTripTests(unittest.TestCase):
+    def test_ini_ndjson_ini_preserves_structure(self):
+        rng = random.Random(20240517)
+
+        for trial in range(200):
+            structure = _random_structure(rng)
+            ini_text = _render_ini(structure)
+
+            # Sanity check that the generator and the parser agree on what
+            # the random text means before using it as the round-trip target.
+            self.assertEqual(
+                list(iter_ini_sections(io.StringIO(ini_text))),
+                structure,
+                msg=f"trial {trial}: generator/parser mismatch",
+            )
+
+            ndjson_buffer = io.StringIO()
+            ini_to_ndjson(io.StringIO(ini_text), ndjson_buffer)
+            ndjson_buffer.seek(0)
+
+            ini_buffer = io.StringIO()
+            ndjson_to_ini(ndjson_buffer, ini_buffer)
+
+            self.assertEqual(
+                list(iter_ini_sections(io.StringIO(ini_buffer.getvalue()))),
+                structure,
+                msg=f"trial {trial}: round trip changed structure",
+            )
 
 
 if __name__ == "__main__":
