@@ -73,6 +73,29 @@ Both directions read from stdin and write to stdout by default, so they
 compose in a pipeline. Pass a filename as the positional argument to read
 from a file, and `-o` to write to one.
 
+## Comments and quoting
+
+A value can be wrapped in single or double quotes, in which case it's read
+literally -- including any `#`, `;`, or leading/trailing whitespace inside
+the quotes -- and `\"`/`\'`/`\\` are unescaped:
+
+```ini
+password = "correct horse#battery staple"
+```
+
+Outside quotes, a `#` or `;` that starts the value or follows whitespace
+begins a comment running to the end of the line:
+
+```ini
+retries = 3  ; fall back to defaults after this many attempts
+```
+
+This means an unquoted value can't itself start with `#` or `;` right
+after the `=` -- there's no way to tell that apart from an empty value
+followed by a comment, so quote it instead: `color = "#ffffff"`. Writing
+NDJSON back to INI quotes values automatically wherever leaving them
+unquoted would change their meaning on the next parse.
+
 From Python, work directly with the generators if you want to process
 sections as they arrive instead of writing a full file:
 
@@ -88,8 +111,7 @@ with open("app.ini") as f:
 
 - Values are always strings; there's no type coercion (matches how INI
   itself has no native types).
-- No support for INI comments trailing on the same line as a value, or for
-  the `%(...)s` interpolation some INI dialects support.
+- No support for the `%(...)s` interpolation some INI dialects support.
 - Duplicate keys within a section keep only the last value.
 
 ## Install

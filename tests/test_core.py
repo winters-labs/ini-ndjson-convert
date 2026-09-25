@@ -1,4 +1,5 @@
 import io
+import json
 import random
 import string
 import unittest
@@ -90,6 +91,61 @@ class EmptySectionTests(unittest.TestCase):
         self.assertEqual(parse("\n\n   \n"), [])
 
 
+class QuotedValueTests(unittest.TestCase):
+    def test_double_quoted_value_preserves_hash(self):
+        text = '[a]\nurl = "http://example.com/#fragment"\n'
+        self.assertEqual(
+            parse(text), [("a", {"url": "http://example.com/#fragment"})]
+        )
+
+    def test_single_quoted_value(self):
+        text = "[a]\nname = 'jane'\n"
+        self.assertEqual(parse(text), [("a", {"name": "jane"})])
+
+    def test_escaped_quote_inside_quoted_value(self):
+        text = '[a]\nmsg = "she said \\"hi\\""\n'
+        self.assertEqual(parse(text), [("a", {"msg": 'she said "hi"'})])
+
+    def test_unterminated_quote_is_kept_literally(self):
+        text = '[a]\nx = "unterminated\n'
+        self.assertEqual(parse(text), [("a", {"x": '"unterminated'})])
+
+
+class InlineCommentTests(unittest.TestCase):
+    def test_hash_comment_after_value(self):
+        text = "[a]\nx = 1  # the answer\n"
+        self.assertEqual(parse(text), [("a", {"x": "1"})])
+
+    def test_semicolon_comment_after_value(self):
+        text = "[a]\nx = 1  ; the answer\n"
+        self.assertEqual(parse(text), [("a", {"x": "1"})])
+
+    def test_section_header_with_trailing_comment(self):
+        text = "[a] ; section a\nx = 1\n"
+        self.assertEqual(parse(text), [("a", {"x": "1"})])
+
+    def test_unquoted_leading_hash_has_no_value(self):
+        # Whitespace right after '=' is indistinguishable from whitespace
+        # before an inline comment, so an unquoted value can't start with
+        # '#' or ';' -- quote it (see QuotedValueTests) if that's needed.
+        text = "[a]\nx = # not a value\n"
+        self.assertEqual(parse(text), [("a", {"x": ""})])
+
+
+class SerializeValueTests(unittest.TestCase):
+    def test_value_with_inline_comment_marker_is_quoted_on_write(self):
+        ndjson_text = json.dumps({"section": "a", "values": {"x": "1 # not a comment"}})
+        buf = io.StringIO()
+        ndjson_to_ini(io.StringIO(ndjson_text + "\n"), buf)
+        self.assertEqual(buf.getvalue(), '[a]\nx = "1 # not a comment"\n')
+
+    def test_plain_value_is_written_unquoted(self):
+        ndjson_text = json.dumps({"section": "a", "values": {"x": "1"}})
+        buf = io.StringIO()
+        ndjson_to_ini(io.StringIO(ndjson_text + "\n"), buf)
+        self.assertEqual(buf.getvalue(), "[a]\nx = 1\n")
+
+
 class NdjsonRoundTripTests(unittest.TestCase):
     def test_ini_to_ndjson_to_ini(self):
         ini_text = (
@@ -133,10 +189,13 @@ class NdjsonRoundTripTests(unittest.TestCase):
 
 # Kept out of NAME_CHARS/VALUE_CHARS: '=', ':', '[', ']', '#', ';', and
 # whitespace. Those all carry grammar meaning (or get stripped) in the
-# current parser, and fuzzing them belongs with the inline-comment/quoting
-# support that parser doesn't have yet.
+# unquoted grammar, and rendering them unquoted (as _render_ini does below)
+# would change their meaning. QuotingRoundTripTests below covers values
+# containing them, going through the real quoting/escaping path instead of
+# _render_ini's plain "key = value" text.
 _NAME_CHARS = string.ascii_letters + string.digits + "_-"
 _VALUE_CHARS = string.ascii_letters + string.digits + "_-."
+_SPECIAL_VALUE_CHARS = _VALUE_CHARS + " #;\"'\\"
 
 
 def _random_token(rng, chars, min_len, max_len):
@@ -202,6 +261,44 @@ class FuzzRoundTripTests(unittest.TestCase):
                 list(iter_ini_sections(io.StringIO(ini_buffer.getvalue()))),
                 structure,
                 msg=f"trial {trial}: round trip changed structure",
+            )
+
+
+class QuotingRoundTripTests(unittest.TestCase):
+    """Same shape as FuzzRoundTripTests, but values may contain '=', ':',
+    '#', ';', quotes, backslashes and spaces -- exactly the characters an
+    unquoted value can't safely hold. The NDJSON side is built directly
+    (not via _render_ini), so this exercises ndjson_to_ini's quoting and
+    iter_ini_sections' quote parsing against each other, not against a
+    naive unquoted renderer that would garble those characters."""
+
+    def test_special_characters_survive_ini_round_trip(self):
+        rng = random.Random(20240518)
+
+        for trial in range(200):
+            structure = []
+            for _ in range(rng.randint(1, 5)):
+                name = _random_token(rng, _NAME_CHARS, 1, 10)
+                values = {
+                    _random_token(rng, _NAME_CHARS, 1, 8): _random_token(
+                        rng, _SPECIAL_VALUE_CHARS, 0, 12
+                    )
+                    for _ in range(rng.randint(0, 5))
+                }
+                structure.append((name, values))
+
+            ndjson_text = "\n".join(
+                json.dumps({"section": name, "values": values})
+                for name, values in structure
+            )
+
+            ini_buffer = io.StringIO()
+            ndjson_to_ini(io.StringIO(ndjson_text), ini_buffer)
+
+            self.assertEqual(
+                list(iter_ini_sections(io.StringIO(ini_buffer.getvalue()))),
+                structure,
+                msg=f"trial {trial}: special-character round trip changed structure",
             )
 
 
