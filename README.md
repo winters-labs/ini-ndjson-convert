@@ -71,7 +71,15 @@ level = debug
 
 Both directions read from stdin and write to stdout by default, so they
 compose in a pipeline. Pass a filename as the positional argument to read
-from a file, and `-o` to write to one.
+from a file, and `-o` to write to one. `-` means stdin or stdout explicitly.
+
+Two options change the format details:
+
+- `--encoding NAME` sets the text encoding for both input and output
+  (default `utf-8`), e.g. `--encoding latin-1` for older config files.
+- `--section-key NAME` sets the NDJSON field that holds the section name
+  (default `section`). It applies in both directions and can't be `values`.
+  The Python functions take the same thing as a `section_key` argument.
 
 ## Comments and quoting
 

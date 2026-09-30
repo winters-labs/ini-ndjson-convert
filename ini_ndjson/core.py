@@ -14,6 +14,7 @@ import json
 import re
 
 GLOBAL_SECTION = ""
+DEFAULT_SECTION_KEY = "section"
 
 _SECTION_RE = re.compile(r"^\[(?P<name>.+)\]\s*(?:[;#].*)?$")
 _KEYVALUE_RE = re.compile(r"^(?P<key>[^=:]+)[=:](?P<value>.*)$")
@@ -119,28 +120,37 @@ def iter_ini_sections(lines):
         yield (current_name or GLOBAL_SECTION), current_values
 
 
-def iter_ndjson_sections(lines):
-    """Yield (section_name, values_dict) tuples, one per NDJSON line."""
+def iter_ndjson_sections(lines, section_key=DEFAULT_SECTION_KEY):
+    """Yield (section_name, values_dict) tuples, one per NDJSON line.
+
+    section_key is the JSON field holding the section name.
+    """
     for raw_line in lines:
         stripped = raw_line.strip()
         if not stripped:
             continue
         record = json.loads(stripped)
-        yield record["section"], record["values"]
+        yield record[section_key], record["values"]
 
 
-def ini_to_ndjson(infile, outfile):
-    """Read INI text from infile, write one JSON object per line to outfile."""
+def ini_to_ndjson(infile, outfile, section_key=DEFAULT_SECTION_KEY):
+    """Read INI text from infile, write one JSON object per line to outfile.
+
+    section_key names the JSON field that carries the section name. It must
+    not be "values", or the name would overwrite the section's contents.
+    """
+    if section_key == "values":
+        raise ValueError('section_key cannot be "values"')
     for name, values in iter_ini_sections(infile):
-        record = {"section": name, "values": values}
+        record = {section_key: name, "values": values}
         outfile.write(json.dumps(record, ensure_ascii=False))
         outfile.write("\n")
 
 
-def ndjson_to_ini(infile, outfile):
+def ndjson_to_ini(infile, outfile, section_key=DEFAULT_SECTION_KEY):
     """Read NDJSON from infile, write INI text to outfile."""
     wrote_anything = False
-    for name, values in iter_ndjson_sections(infile):
+    for name, values in iter_ndjson_sections(infile, section_key):
         if name != GLOBAL_SECTION:
             if wrote_anything:
                 outfile.write("\n")
